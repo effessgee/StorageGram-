@@ -1,0 +1,6 @@
+{
+  "name": "StorageGram",
+  "description": "Free, private, and unlimited cloud storage with an automated speed booster and background auto-save queue.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
