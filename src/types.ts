@@ -65,4 +65,13 @@ export interface TelegramConfig {
   userSessionActive?: boolean;
 }
 
+export interface TelegramAccount {
+  id: string;
+  name: string;
+  username: string;
+  type: 'bot' | 'user' | 'qr';
+  config: TelegramConfig;
+}
+
+
 

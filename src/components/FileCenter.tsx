@@ -66,8 +66,10 @@ export default function FileCenter({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      onQueueUploadTask(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      Array.from(e.dataTransfer.files).forEach(file => {
+        onQueueUploadTask(file as File);
+      });
     }
   };
 
@@ -76,8 +78,10 @@ export default function FileCenter({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      onQueueUploadTask(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      Array.from(e.target.files).forEach(file => {
+        onQueueUploadTask(file as File);
+      });
     }
   };
 
@@ -121,51 +125,26 @@ export default function FileCenter({
           {/* Subtle neon dropzone background */}
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-44 h-44 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none group-hover:bg-cyan-500/10 transition-all duration-300" />
 
-          {activeUploadTask ? (
-            /* Uploading Active State */
-            <div className="space-y-4 max-w-sm w-full select-none" onClick={(e) => e.stopPropagation()}>
-              <div className="mx-auto p-4 bg-cyan-950/30 border border-cyan-900/30 rounded-2xl w-fit animate-ping" style={{ animationDuration: '3s' }}>
-                <UploadCloud className="w-8 h-8 text-cyan-400" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-200">Preparing and securing file...</p>
-                <p className="text-[10px] font-sans text-cyan-400 mt-1 max-w-[280px] truncate mx-auto">{activeUploadTask.fileName}</p>
-              </div>
-              
-              <div className="space-y-1.5 w-full mt-2">
-                <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden relative border border-slate-905">
-                  <div 
-                    className="absolute top-0 left-0 bg-gradient-to-r from-cyan-400 via-indigo-500 to-emerald-400 h-full rounded-full transition-all duration-200" 
-                    style={{ width: `${activeUploadTask.progress}%` }}
-                  />
-                </div>
-                <div className="flex justify-between text-[9px] text-slate-500 font-sans select-none">
-                  <span>Saving: {activeUploadTask.progress.toFixed(0)}% Done</span>
-                  <span className="text-cyan-400 font-bold">Speed: {activeUploadTask.speed.toFixed(1)} MB/s</span>
-                </div>
-              </div>
+          {/* Ready to Upload Idle State */}
+          <div className="space-y-4 select-none">
+            <div className="mx-auto p-4 bg-slate-950 rounded-2xl w-fit group-hover:scale-105 transition-all outline outline-slate-800">
+              <UploadCloud className="w-8 h-8 text-slate-400 group-hover:text-emerald-400 transition-all duration-300" />
             </div>
-          ) : (
-            /* Ready to Upload Idle State */
-            <div className="space-y-4 select-none">
-              <div className="mx-auto p-4 bg-slate-950 rounded-2xl w-fit group-hover:scale-105 transition-all outline outline-slate-800">
-                <UploadCloud className="w-8 h-8 text-slate-400 group-hover:text-emerald-400 transition-all duration-300" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-slate-200 font-sans">
-                  Drag & Drop files here, or <span className="text-emerald-400 group-hover:underline">click to browse</span>
-                </p>
-                <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto leading-normal font-sans">
-                  No file size limits. All files are safely stored behind a high-speed secure link.
-                </p>
-              </div>
+            <div>
+              <p className="text-sm font-bold text-slate-200 font-sans">
+                Drag & Drop files here, or <span className="text-emerald-400 group-hover:underline">click to browse</span>
+              </p>
+              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto leading-normal font-sans">
+                Supports all files & video sizes. Dropping will queue transfers instantly in parallel below.
+              </p>
             </div>
-          )}
+          </div>
 
           <input
             type="file"
             ref={fileInputRef}
             onChange={handleFileChange}
+            multiple
             className="hidden"
           />
         </div>

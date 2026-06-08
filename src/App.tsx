@@ -5,34 +5,90 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
-  Cloud, Pocket, Shield, Cpu, ExternalLink, Send, Zap, HardDrive, Sparkles, Server, Folder, RefreshCw, ListFilter, Smartphone
+  Cloud, Pocket, Shield, Cpu, ExternalLink, Send, Zap, Sparkles, Server, Folder, RefreshCw, ListFilter, Smartphone
 } from 'lucide-react';
-import { UnLimFile, BackgroundTask, TelegramConfig } from './types';
+import { UnLimFile, BackgroundTask, TelegramConfig, TelegramAccount } from './types';
 import { INITIAL_FILES } from './data/defaultFiles';
 import FileCenter from './components/FileCenter';
 import AutoSecureEngine from './components/AutoSecureEngine';
-import BackgroundDaemon from './components/BackgroundDaemon';
 import { StorageGramLogo } from './components/StorageGramLogo';
 import TelegramAligner from './components/TelegramAligner';
 
 export default function App() {
   const [files, setFiles] = useState<UnLimFile[]>(INITIAL_FILES);
   
-  const [telegramConfig, setTelegramConfig] = useState<TelegramConfig>(() => {
+  const [telegramAccounts, setTelegramAccounts] = useState<TelegramAccount[]>(() => {
     try {
-      const saved = localStorage.getItem('storagegram_tg_config');
-      if (saved) return JSON.parse(saved);
+      const savedAccounts = localStorage.getItem('storagegram_tg_accounts');
+      if (savedAccounts) return JSON.parse(savedAccounts);
+      
+      const savedConfig = localStorage.getItem('storagegram_tg_config');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        if (parsed && parsed.isAligned) {
+          const type = parsed.alignmentType || 'bot';
+          const name = parsed.botName || 'Main Account';
+          const username = parsed.botUsername || '@User';
+          const migrated: TelegramAccount = {
+            id: 'legacy-tg-acc',
+            name,
+            username,
+            type,
+            config: parsed
+          };
+          return [migrated];
+        }
+      }
     } catch (e) {}
-    return {
+    return [];
+  });
+
+  const [activeAccountId, setActiveAccountId] = useState<string | null>(() => {
+    const savedActive = localStorage.getItem('storagegram_active_account_id');
+    if (savedActive) return savedActive;
+    
+    try {
+      const savedAccounts = localStorage.getItem('storagegram_tg_accounts');
+      if (savedAccounts) {
+        const parsed = JSON.parse(savedAccounts);
+        if (parsed && parsed.length > 0) return parsed[0].id;
+      }
+      
+      const savedConfig = localStorage.getItem('storagegram_tg_config');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        if (parsed && parsed.isAligned) return 'legacy-tg-acc';
+      }
+    } catch (e) {}
+    return null;
+  });
+
+  const telegramConfig = useMemo<TelegramConfig>(() => {
+    const activeAccount = telegramAccounts.find(acc => acc.id === activeAccountId);
+    return activeAccount ? activeAccount.config : {
       botToken: '',
       chatId: '',
       isEnabled: false,
       isAligned: false
     };
-  });
+  }, [telegramAccounts, activeAccountId]);
 
   useEffect(() => {
-    localStorage.setItem('storagegram_tg_config', JSON.stringify(telegramConfig));
+    localStorage.setItem('storagegram_tg_accounts', JSON.stringify(telegramAccounts));
+  }, [telegramAccounts]);
+
+  useEffect(() => {
+    if (activeAccountId) {
+      localStorage.setItem('storagegram_active_account_id', activeAccountId);
+    } else {
+      localStorage.removeItem('storagegram_active_account_id');
+    }
+  }, [activeAccountId]);
+
+  useEffect(() => {
+    if (telegramConfig) {
+      localStorage.setItem('storagegram_tg_config', JSON.stringify(telegramConfig));
+    }
   }, [telegramConfig]);
 
   // Keep live references of raw File uploads for real Telegram operations
@@ -56,7 +112,7 @@ export default function App() {
   const [vpnActive, setVpnActive] = useState(true);
   
   // Navigation active collapsible panel drawer state
-  const [activeMenu, setActiveMenu] = useState<'telegram' | 'booster' | 'backup' | 'stats' | 'queue' | null>(null);
+  const [activeMenu, setActiveMenu] = useState<'telegram' | 'booster' | 'backup' | null>(null);
 
   // Phone Backup Simulator states
   const [autoBackupActive, setAutoBackupActive] = useState(false);
@@ -215,7 +271,7 @@ export default function App() {
             const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'].includes(extension);
             
             const newFile: UnLimFile = {
-              id: 'file-' + Date.now(),
+              id: 'file-' + Date.now() + '-' + Math.floor(Math.random() * 1000000),
               name: task.fileName,
               size: task.fileSize,
               type: isImage ? 'image/jpeg' : 'application/octet-stream',
@@ -265,14 +321,17 @@ export default function App() {
     const isDemo = isUserAccount || telegramConfig.botToken.includes('demoToken');
     const isReal = isConnected && !isDemo && telegramConfig.alignmentType === 'bot';
 
+    // Telegram Bot API restricts file uploads to 50MB. Report error immediately for large uploads.
+    const isTooLarge = isReal && file.size > 50 * 1024 * 1024;
+
     const newTask: BackgroundTask = {
-      id: 'upl-' + Date.now(),
+      id: 'upl-' + Date.now() + '-' + Math.floor(Math.random() * 1000000),
       fileName: file.name,
       fileSize: file.size,
       direction: 'upload',
       progress: 0,
       speed: 0,
-      status: 'queued',
+      status: isTooLarge ? 'failed' : 'queued',
       retryCount: 0,
       estimatedRemainingSec: 0,
       isReal: isReal,
@@ -288,7 +347,12 @@ export default function App() {
         ? ' (MTProto QR Linked Account)'
         : (isUserAccount ? ' (MTProto Personal Account)' : (isDemo ? ' (Mock Telegram)' : ' (Telegram Live Cloud)'));
     }
-    addLog(`System: File '${file.name}' secured and added to the transfer list.${suffix}`);
+
+    if (isTooLarge) {
+      addLog(`Validation Error: '${file.name}' (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the Telegram Bot API limit of 50MB.`);
+    } else {
+      addLog(`System: File '${file.name}' secured and added to the transfer list.${suffix}`);
+    }
   };
 
   // Handle addition of a download file to the centralized automated download queue
@@ -334,7 +398,7 @@ export default function App() {
     addLog(`Telegram: Establishing secure tunnel for ${file.name}...`);
 
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `https://api.telegram.org/bot${token}/sendDocument`);
+    xhr.open('POST', `/api/telegram-proxy/bot${token}/sendDocument`);
 
     const formData = new FormData();
     formData.append('chat_id', chatId);
@@ -384,12 +448,12 @@ export default function App() {
 
             const isImage = file.type.startsWith('image/');
             const newFile: UnLimFile = {
-              id: 'file-' + Date.now(),
+              id: 'file-' + Date.now() + '-' + Math.floor(Math.random() * 1000000),
               name: file.name,
               size: file.size,
               type: file.type || 'application/octet-stream',
               category: isImage ? 'photos' : 'documents',
-              url: `https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`,
+              url: `/api/telegram-proxy/bot${token}/getFile?file_id=${fileId}`,
               thumbnailUrl: isImage ? URL.createObjectURL(file) : undefined,
               uploadedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
               telegramFileId: fileId
@@ -421,7 +485,7 @@ export default function App() {
     addLog(`Telegram Cloud: Fetching direct file path for ID ${fileId.substring(0, 10)}...`);
 
     try {
-      const getFileResponse = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+      const getFileResponse = await fetch(`/api/telegram-proxy/bot${token}/getFile?file_id=${fileId}`);
       const fileData = await getFileResponse.json();
 
       if (!fileData.ok || !fileData.result || !fileData.result.file_path) {
@@ -429,7 +493,7 @@ export default function App() {
       }
 
       const filePath = fileData.result.file_path;
-      const downloadUrl = `https://api.telegram.org/file/bot${token}/${filePath}`;
+      const downloadUrl = `/api/telegram-proxy/file/bot${token}/${filePath}`;
 
       addLog(`Telegram Cloud: Resolving gateway stream for ${fileName}...`);
 
@@ -495,6 +559,81 @@ export default function App() {
   const handleClearCompletedTasks = () => {
     setTasks(prev => prev.filter(t => t.status !== 'completed'));
     addLog('System: Cleared completed transfers list.');
+  };
+
+  const handleConfigChange = (newConfig: TelegramConfig) => {
+    if (newConfig.isAligned) {
+      const identityName = newConfig.botName || (newConfig.alignmentType === 'bot' ? 'Telegram Bot Target' : 'Personal Cloud Space');
+      const identityUsername = newConfig.botUsername || (newConfig.alignmentType === 'bot' ? '@bot' : (newConfig.username || 'Saved Messages'));
+      const identityType = newConfig.alignmentType || 'bot';
+
+      setTelegramAccounts(prev => {
+        const existsIdx = prev.findIndex(acc => 
+          (acc.type === 'bot' && acc.config.botToken === newConfig.botToken) ||
+          (acc.type === 'user' && acc.config.phoneNumber === newConfig.phoneNumber) ||
+          (acc.type === 'qr' && acc.config.username === newConfig.username)
+        );
+
+        let updated;
+        if (existsIdx > -1) {
+          updated = [...prev];
+          updated[existsIdx] = {
+            ...updated[existsIdx],
+            name: identityName,
+            username: identityUsername,
+            type: identityType,
+            config: newConfig
+          };
+        } else {
+          const newAcc: TelegramAccount = {
+            id: 'tg-acc-' + Date.now(),
+            name: identityName,
+            username: identityUsername,
+            type: identityType,
+            config: newConfig
+          };
+          updated = [...prev, newAcc];
+        }
+        
+        const newlyActiveId = existsIdx > -1 ? prev[existsIdx].id : updated[updated.length - 1].id;
+        setActiveAccountId(newlyActiveId);
+        return updated;
+      });
+    } else {
+      if (activeAccountId) {
+        setTelegramAccounts(prev => {
+          const existsIdx = prev.findIndex(acc => acc.id === activeAccountId);
+          if (existsIdx > -1) {
+            const updated = [...prev];
+            updated[existsIdx] = {
+              ...updated[existsIdx],
+              config: newConfig
+            };
+            return updated;
+          }
+          return prev;
+        });
+      }
+    }
+  };
+
+  const handleActivateAccount = (id: string) => {
+    setActiveAccountId(id);
+    const acc = telegramAccounts.find(a => a.id === id);
+    if (acc) {
+      addLog(`System: Active Telegram sync node switched to ${acc.name}`);
+    }
+  };
+
+  const handleRemoveAccount = (id: string) => {
+    setTelegramAccounts(prev => {
+      const filtered = prev.filter(acc => acc.id !== id);
+      if (activeAccountId === id) {
+        setActiveAccountId(filtered.length > 0 ? filtered[filtered.length - 1].id : null);
+      }
+      return filtered;
+    });
+    addLog(`System: De-linked and removed Telegram sync node.`);
   };
 
   const activeUploadTask = tasks.find(t => t.direction === 'upload' && (t.status === 'active' || t.status === 'interrupted'));
@@ -594,39 +733,7 @@ export default function App() {
               </span>
             </button>
 
-            {/* Pill 4: Capacity Stats & Analytics */}
-            <button
-              onClick={() => setActiveMenu(activeMenu === 'stats' ? null : 'stats')}
-              className={`py-2 px-3.5 rounded-full text-xs font-bold font-sans transition-all flex items-center gap-2 cursor-pointer border ${
-                activeMenu === 'stats'
-                  ? 'bg-cyan-950 text-cyan-300 border-cyan-500/40 shadow-lg shadow-cyan-950'
-                  : 'bg-slate-900/50 hover:bg-slate-900 text-slate-350 border-slate-850 hover:border-slate-800'
-              }`}
-            >
-              <HardDrive className="w-3.5 h-3.5 text-slate-400" />
-              <span>Space Quota</span>
-              <span className="text-[9px] px-1.5 py-0.2 rounded font-sans font-black uppercase bg-emerald-950/60 text-emerald-400 border border-emerald-900/30">
-                Unlimited
-              </span>
-            </button>
 
-            {/* Pill 5: Detailed Activity Logs BackgroundDaemon */}
-            <button
-              onClick={() => setActiveMenu(activeMenu === 'queue' ? null : 'queue')}
-              className={`py-2 px-3.5 rounded-full text-xs font-bold font-sans transition-all flex items-center gap-2 cursor-pointer border ${
-                activeMenu === 'queue'
-                  ? 'bg-cyan-950 text-cyan-300 border-cyan-500/40 shadow-lg shadow-cyan-950'
-                  : 'bg-slate-900/50 hover:bg-slate-900 text-slate-350 border-slate-850 hover:border-slate-800'
-              }`}
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${activeTasksCount > 0 ? 'animate-spin text-cyan-400' : 'text-slate-550'}`} />
-              <span>Activity Queue</span>
-              {activeTasksCount > 0 && (
-                <span className="text-[9px] px-1.5 py-0.2 rounded font-sans font-extrabold bg-indigo-950 text-indigo-400 border border-indigo-900/30 animate-pulse">
-                  {activeTasksCount} Pending
-                </span>
-              )}
-            </button>
 
           </div>
         </div>
@@ -644,8 +751,6 @@ export default function App() {
                   {activeMenu === 'telegram' && 'Telegram Client Integration'}
                   {activeMenu === 'booster' && 'Speed Optimizer & Concurrency'}
                   {activeMenu === 'backup' && 'Auto Phone Sync & Smart Gallery Capture'}
-                  {activeMenu === 'stats' && 'Cloud Storage Stats & Allocated Quota'}
-                  {activeMenu === 'queue' && 'Transmission Queue Daemon'}
                 </span>
               </div>
               <button 
@@ -658,7 +763,14 @@ export default function App() {
 
             <div className="max-w-5xl mx-auto">
               {activeMenu === 'telegram' && (
-                <TelegramAligner config={telegramConfig} onConfigChange={setTelegramConfig} />
+                <TelegramAligner 
+                  config={telegramConfig} 
+                  onConfigChange={handleConfigChange} 
+                  accounts={telegramAccounts}
+                  activeAccountId={activeAccountId}
+                  onActivateAccount={handleActivateAccount}
+                  onRemoveAccount={handleRemoveAccount}
+                />
               )}
               
               {activeMenu === 'booster' && (
@@ -713,85 +825,7 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              )}
-
-              {activeMenu === 'stats' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-                  
-                  {/* Storage Allocation metrics */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 relative overflow-hidden flex flex-col justify-between">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <p className="text-xs font-bold text-slate-400 font-sans flex items-center gap-1.5 leading-none">
-                          <HardDrive className="w-4 h-4 text-emerald-400" /> Allocated Storage Cap
-                        </p>
-                        <h3 className="text-3xl font-black text-white mt-2">Unlimited</h3>
-                      </div>
-                      <span className="text-[10px] px-2.5 py-1 bg-emerald-950 text-emerald-400 font-bold border border-emerald-900/40 rounded-full flex items-center gap-1">
-                        <Sparkles className="w-3.5 h-3.5 fill-emerald-500/10 text-emerald-400" /> LIFETIME FREE
-                      </span>
-                    </div>
-
-                    <div className="mt-6 space-y-3.5">
-                      <div className="flex justify-between text-xs text-slate-400 font-sans">
-                        <span>Private Cloud Archive</span>
-                        <span className="font-bold text-slate-200">{files.length} documents secured</span>
-                      </div>
-                      <div className="w-full bg-slate-950 h-2.5 rounded-full relative overflow-hidden">
-                        <div className="absolute top-0 left-0 bg-gradient-to-r from-emerald-500 via-indigo-500 to-cyan-400 h-full rounded-full" style={{ width: '45%' }} />
-                      </div>
-                      <p className="text-[11px] text-slate-500 leading-relaxed font-sans">
-                        Unlike traditional limits, StorageGram couples straight with MTProto parallel routing pathways, bypassing classical size quotas for completely unmetered locker backups.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Fictional distribution metrics */}
-                  <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4">
-                    <h4 className="text-xs font-bold font-sans text-slate-400 uppercase tracking-widest border-b border-slate-800/80 pb-2">
-                      Locker Category Breakdown
-                    </h4>
-                    
-                    <div className="space-y-3.5">
-                      <div>
-                        <div className="flex justify-between text-xs text-slate-400 mb-1">
-                          <span>Photos & Camera Media</span>
-                          <span className="font-bold text-emerald-400">{files.filter(f => f.category === 'photos').length} items</span>
-                        </div>
-                        <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden font-sans">
-                          <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${(files.filter(f => f.category === 'photos').length / Math.max(1, files.length)) * 100}%` }} />
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between text-xs text-slate-400 mb-1">
-                          <span>Binary Files & Documents</span>
-                          <span className="font-bold text-amber-400">{files.filter(f => f.category === 'documents').length} items</span>
-                        </div>
-                        <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden font-sans">
-                          <div className="bg-amber-400 h-full rounded-full" style={{ width: `${(files.filter(f => f.category === 'documents').length / Math.max(1, files.length)) * 105}%` }} />
-                        </div>
-                      </div>
-
-                      <div className="bg-slate-950 p-2 text-[10px] text-slate-500 font-sans text-center rounded-xl border border-slate-850">
-                        📁 Categories instantly filter down in the Cloud Locker list.
-                      </div>
-                    </div>
-                  </div>
-
-                </div>
-              )}
-
-              {activeMenu === 'queue' && (
-                <BackgroundDaemon 
-                  tasks={tasks}
-                  daemonActive={daemonActive}
-                  logs={logs}
-                  onToggleDaemon={handleToggleDaemonStatus}
-                  onClearCompleted={handleClearCompletedTasks}
-                />
-              )}
+                   )}
             </div>
 
           </div>
